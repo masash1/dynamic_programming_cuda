@@ -52,6 +52,8 @@ __constant__ double d_gamma1;
 __constant__ double d_vGoal, d_vObst, d_vMove;
 __constant__ double d_vInitial;
 __constant__ int d_numActions;
+//__constant__ double *d_isobst;
+//__constant__ double *d_isgoal;
 
 int main(int argc, char **argv){
 	// DEFINE PARAMETERS
@@ -93,6 +95,13 @@ int main(int argc, char **argv){
 	setObst(isobst);
 	setGoal(thetaVec, phiVec, isgoal);
 
+	// DEFINE OBSTACLE AND GOAL LOCATIONS IN GPU
+	double *d_isobst, *d_isgoal;
+	CHECK(cudaMalloc((double**)&d_isobst, nr*ntheta*nphi*sizeof(double)));
+	CHECK(cudaMalloc((double**)&d_isgoal, nr*ntheta*nphi*sizeof(double)));
+	CHECK(cudaMemcpy(d_isobst, isobst, nr*ntheta*nphi*sizeof(double), cudaMemcpyHostToDevice));
+	CHECK(cudaMemcpy(d_isgoal, isgoal, nr*ntheta*nphi*sizeof(double), cudaMemcpyHostToDevice));
+
 	// DEFINE INITIAL GUESS AT VALUE AND POLICY
 	double *J;
 	double *U;
@@ -128,17 +137,17 @@ int main(int argc, char **argv){
 		memcpy(Uprev, U, sizeof(double)*nr*ntheta*nphi);
 
 		// allocate memory at device
-		double *d_isobst, *d_isgoal, *d_J, *d_U, *d_Jprev, *d_Uprev;
-		CHECK(cudaMalloc((double**)&d_isobst, nr*ntheta*nphi*sizeof(double)));
-		CHECK(cudaMalloc((double**)&d_isgoal, nr*ntheta*nphi*sizeof(double)));
+		double  *d_J, *d_U, *d_Jprev, *d_Uprev;
+		//CHECK(cudaMalloc((double**)&d_isobst, nr*ntheta*nphi*sizeof(double)));
+		//CHECK(cudaMalloc((double**)&d_isgoal, nr*ntheta*nphi*sizeof(double)));
 		CHECK(cudaMalloc((double**)&d_J, nr*ntheta*nphi*sizeof(double)));
 		CHECK(cudaMalloc((double**)&d_U, nr*ntheta*nphi*sizeof(double)));
 		CHECK(cudaMalloc((double**)&d_Jprev, nr*ntheta*nphi*sizeof(double)));
 		CHECK(cudaMalloc((double**)&d_Uprev, nr*ntheta*nphi*sizeof(double)));
 
 		// transfer data from host to device
-		CHECK(cudaMemcpy(d_isobst, isobst, nr*ntheta*nphi*sizeof(double), cudaMemcpyHostToDevice));
-		CHECK(cudaMemcpy(d_isgoal, isgoal, nr*ntheta*nphi*sizeof(double), cudaMemcpyHostToDevice));
+		//CHECK(cudaMemcpy(d_isobst, isobst, nr*ntheta*nphi*sizeof(double), cudaMemcpyHostToDevice));
+		//CHECK(cudaMemcpy(d_isgoal, isgoal, nr*ntheta*nphi*sizeof(double), cudaMemcpyHostToDevice));
 		CHECK(cudaMemcpy(d_J, J, nr*ntheta*nphi*sizeof(double), cudaMemcpyHostToDevice));
 		CHECK(cudaMemcpy(d_U, U, nr*ntheta*nphi*sizeof(double), cudaMemcpyHostToDevice));
 		CHECK(cudaMemcpy(d_Jprev, Jprev, nr*ntheta*nphi*sizeof(double), cudaMemcpyHostToDevice));
