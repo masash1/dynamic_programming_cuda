@@ -37,13 +37,21 @@ __device__ void computeTotalCost(double *, double *);
 __device__ double computeNewValue(double *);
 __device__ double computeNewPolicy(double *);
 
-// DEFINE GLOBAL PARAMETERS
-__constant__ int nr=3, ntheta=3, nphi=3;
-__constant__ double perr=0.0;
-__constant__ double gamma1=1.0;
-__constant__ double vGoal=100.0, vObst=-100.0, vMove=-1.0;
-__constant__ double vInitial=0.0;
-__constant__ int numActions = 7;
+// DEFINE GLOBAL PARAMETERS IN CPU
+int nr, ntheta, nphi;
+double perr;
+double gamma1;
+double vGoal, vObst, vMove;
+double vInitial;
+int numActions=7;
+
+// DEFINE GLOBAL PARAMETERS IN GPU
+__constant__ int d_nr, d_ntheta, d_nphi;
+__constant__ double d_perr;
+__constant__ double d_gamma1;
+__constant__ double d_vGoal, d_vObst, d_vMove;
+__constant__ double d_vInitial;
+__constant__ int d_numActions;
 
 int main(int argc, char **argv){
 	// DEFINE PARAMETERS
@@ -57,9 +65,9 @@ int main(int argc, char **argv){
 	thetadim[0] = 0.0, thetadim[1] = 360.0;
 	phidim[0] = 0.0, phidim[1] = 360.0;
 	// - number of grid cells
-//	nr = numberCells(dr, rdim);
-//	ntheta = numberCells(dtheta, thetadim);
-//	nphi = numberCells(dphi, phidim);
+	nr = numberCells(dr, rdim);
+	ntheta = numberCells(dtheta, thetadim);
+	nphi = numberCells(dphi, phidim);
 	// - vectors for r, theta, phi
 	rVec = (double *)malloc(sizeof(double)*nr);
 	thetaVec = (double *)malloc(sizeof(double)*ntheta);
@@ -68,15 +76,15 @@ int main(int argc, char **argv){
 	setVector(ntheta, dtheta, thetadim, thetaVec);
 	setVector(nphi, dphi, phidim, phiVec);
 	// - probability of going the wrong way
-//	perr = 0.0;
+	perr = 0.0;
 	// attenuation rate
-//	gamma1 = 1.0;
+	gamma1 = 1.0;
 	// - value of goal, collision, movement
-//	vGoal = 100.0;
-//	vObst = -100.0;
-//	vMove = -1.0;
+	vGoal = 100.0;
+	vObst = -100.0;
+	vMove = -1.0;
 	// initial guess at all values
-//	vInitial = 0.0;
+	vInitial = 0.0;
 
 	// DEFINE OBSTACLE AND GOAL LOCATIONS
 	double *isobst, *isgoal;
@@ -99,6 +107,18 @@ int main(int argc, char **argv){
 	double *Uprev;
 	Jprev = (double *)calloc(nr*ntheta*nphi, sizeof(double));
 	Uprev = (double *)calloc(nr*ntheta*nphi, sizeof(double));
+	
+	// TRANSFER VARIABLE DATA FROM HOST TO DEVICE
+	CHECK(cudaMemcpyToSymbol(*(&d_nr), &nr, sizeof(int), 0, cudaMemcpyHostToDevice));
+	CHECK(cudaMemcpyToSymbol(*(&d_ntheta), &ntheta, sizeof(int), 0, cudaMemcpyHostToDevice));
+	CHECK(cudaMemcpyToSymbol(*(&d_nphi), &nphi, sizeof(int), 0, cudaMemcpyHostToDevice));
+	CHECK(cudaMemcpyToSymbol(*(&d_perr), &perr, sizeof(double), 0, cudaMemcpyHostToDevice));
+	CHECK(cudaMemcpyToSymbol(*(&d_gamma1), &gamma1, sizeof(double), 0, cudaMemcpyHostToDevice));
+	CHECK(cudaMemcpyToSymbol(*(&d_vGoal), &vGoal, sizeof(double), 0, cudaMemcpyHostToDevice));
+	CHECK(cudaMemcpyToSymbol(*(&d_vObst), &vObst, sizeof(double), 0, cudaMemcpyHostToDevice));
+	CHECK(cudaMemcpyToSymbol(*(&d_vMove), &vMove, sizeof(double), 0, cudaMemcpyHostToDevice));
+	CHECK(cudaMemcpyToSymbol(*(&d_vInitial), &vInitial, sizeof(double), 0, cudaMemcpyHostToDevice));
+	CHECK(cudaMemcpyToSymbol(*(&d_numActions), &numActions, sizeof(int), 0, cudaMemcpyHostToDevice));
 
 	for(int t=0; t<T; t++){
 		printf("Iteration %d\n", t+1);
@@ -267,12 +287,12 @@ __global__ void valueIteration(double *isobst, double *isgoal, double *J, double
 	int k=blockIdx.z*blockDim.z+threadIdx.z;
 
 	double *tempCost, *totalCost;
-	tempCost = (double*)malloc(numActions*sizeof(double));
-	totalCost = (double*)malloc(numActions*sizeof(double));
+	tempCost = (double*)malloc(d_numActions*sizeof(double));
+	totalCost = (double*)malloc(d_numActions*sizeof(double));
 
-	if(i<nr && j<ntheta && k<nphi){
-		if(!isobst[nr*ntheta*k+ntheta*i+j] && !isgoal[nr*ntheta*k+ntheta*i+j]){
-			tempCost[0]=Jprev[nr*ntheta*k+ntheta*i+j];
+	if(i<d_nr && j<d_ntheta && k<d_nphi){
+		if(!isobst[d_nr*d_ntheta*k+d_ntheta*i+j] && !isgoal[d_nr*d_ntheta*k+d_ntheta*i+j]){
+			tempCost[0]=Jprev[d_nr*d_ntheta*k+d_ntheta*i+j];
 			// condition of r
 			conditionR(i, j, k, tempCost, Jprev);
 
@@ -281,8 +301,8 @@ __global__ void valueIteration(double *isobst, double *isgoal, double *J, double
 
 			// Compute the new exptected cost-to-go, by taking the maximum over
 			// possible actions.
-			J[nr*ntheta*k+ntheta*i+j] = computeNewValue(totalCost);
-			U[nr*ntheta*k+ntheta*i+j] = computeNewPolicy(totalCost);
+			J[d_nr*d_ntheta*k+d_ntheta*i+j] = computeNewValue(totalCost);
+			U[d_nr*d_ntheta*k+d_ntheta*i+j] = computeNewPolicy(totalCost);
 		}
 	}
 
@@ -292,55 +312,55 @@ __global__ void valueIteration(double *isobst, double *isgoal, double *J, double
 
 __device__ void conditionR(int i, int j, int k, double *tempCost, double *Jprev){
 	if(i==0){
-		tempCost[1] = Jprev[nr*ntheta*k+ntheta*(i+1)+j];
-		tempCost[2] = Jprev[nr*ntheta*k+ntheta*i+j];
+		tempCost[1] = Jprev[d_nr*d_ntheta*k+d_ntheta*(i+1)+j];
+		tempCost[2] = Jprev[d_nr*d_ntheta*k+d_ntheta*i+j];
 	}
 	else{
-		tempCost[1] = Jprev[nr*ntheta*k+ntheta*(i+1)+j];
-		tempCost[2] = Jprev[nr*ntheta*k+ntheta*(i-1)+j];
+		tempCost[1] = Jprev[d_nr*d_ntheta*k+d_ntheta*(i+1)+j];
+		tempCost[2] = Jprev[d_nr*d_ntheta*k+d_ntheta*(i-1)+j];
 	}
 	conditionTheta(i, j, k, tempCost, Jprev);
 }
 
 __device__ void conditionTheta(int i, int j, int k, double *tempCost, double *Jprev){
 	if(j==0){
-		tempCost[3] = Jprev[nr*ntheta*k+ntheta*i+(j+1)];
-		tempCost[4] = Jprev[nr*ntheta*k+ntheta*i+(ntheta-1)];
+		tempCost[3] = Jprev[d_nr*d_ntheta*k+d_ntheta*i+(j+1)];
+		tempCost[4] = Jprev[d_nr*d_ntheta*k+d_ntheta*i+(d_ntheta-1)];
 	}
-	else if(j==ntheta-1){
-		tempCost[3] = Jprev[nr*ntheta*k+ntheta*i];
-		tempCost[4] = Jprev[nr*ntheta*k+ntheta*i+(j-1)];
+	else if(j==d_ntheta-1){
+		tempCost[3] = Jprev[d_nr*d_ntheta*k+d_ntheta*i];
+		tempCost[4] = Jprev[d_nr*d_ntheta*k+d_ntheta*i+(j-1)];
 	}
 	else{
-		tempCost[3] = Jprev[nr*ntheta*k+ntheta*i+(j+1)];
-		tempCost[4] = Jprev[nr*ntheta*k+ntheta*i+(j-1)];
+		tempCost[3] = Jprev[d_nr*d_ntheta*k+d_ntheta*i+(j+1)];
+		tempCost[4] = Jprev[d_nr*d_ntheta*k+d_ntheta*i+(j-1)];
 	}
 	conditionPhi(i, j, k, tempCost, Jprev);
 }
 
 __device__ void conditionPhi(int i, int j, int k, double *tempCost, double *Jprev){
 	if(k==0){
-		tempCost[5] = Jprev[nr*ntheta*(k+1)+ntheta*i+j];
-		tempCost[6] = Jprev[nr*ntheta*(nphi-1)+ntheta*i+j];
+		tempCost[5] = Jprev[d_nr*d_ntheta*(k+1)+d_ntheta*i+j];
+		tempCost[6] = Jprev[d_nr*d_ntheta*(d_nphi-1)+d_ntheta*i+j];
 	}
-	else if(k==nphi-1){
-		tempCost[5] = Jprev[ntheta*i+j];
-		tempCost[6] = Jprev[nr*ntheta*(k-1)+ntheta*i+j];
+	else if(k==d_nphi-1){
+		tempCost[5] = Jprev[d_ntheta*i+j];
+		tempCost[6] = Jprev[d_nr*d_ntheta*(k-1)+d_ntheta*i+j];
 	}
 	else{
-		tempCost[5] = Jprev[nr*ntheta*(k+1)+ntheta*i+j];
-		tempCost[6] = Jprev[nr*ntheta*(k-1)+ntheta*i+j];
+		tempCost[5] = Jprev[d_nr*d_ntheta*(k+1)+d_ntheta*i+j];
+		tempCost[6] = Jprev[d_nr*d_ntheta*(k-1)+d_ntheta*i+j];
 	}
 }
 
 __device__ void computeTotalCost(double *tempCost, double *totalCost){
 	double tempCostTotal=0;
 	
-	for(int n=0; n<numActions; n++){
+	for(int n=0; n<d_numActions; n++){
 		tempCostTotal+=tempCost[n];
 	}
-	for(int n=0; n<numActions; n++){
-		totalCost[n]=vMove+gamma1*((1-perr)*tempCost[n]+(perr/6)*(tempCostTotal-tempCost[n]));
+	for(int n=0; n<d_numActions; n++){
+		totalCost[n]=d_vMove+d_gamma1*((1-d_perr)*tempCost[n]+(d_perr/6)*(tempCostTotal-tempCost[n]));
 	}
 }
 
@@ -348,7 +368,7 @@ __device__ double computeNewValue(double *totalCost){
 	double max;
 	max = totalCost[0];
 
-	for(int n=0; n<numActions; n++){
+	for(int n=0; n<d_numActions; n++){
 		if(totalCost[n]>max)
 			max=totalCost[n];
 	}
@@ -361,7 +381,7 @@ __device__ double computeNewPolicy(double *totalCost){
 	double idx;
 	max = totalCost[0];
 
-	for(int n=0; n<numActions; n++){
+	for(int n=0; n<d_numActions; n++){
 		if(totalCost[n]>max){
 			max=totalCost[n];
 			idx=n;
