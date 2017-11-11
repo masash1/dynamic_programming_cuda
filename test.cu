@@ -1,9 +1,7 @@
-/*********************************************************
-*********************************************************/
 #include <stdio.h>
 #include <math.h>
 #include <stdlib.h>
-#include <time.h>
+#include <sys/time.h>
 #include <string.h>
 #include <cuda_runtime.h>
 
@@ -37,6 +35,9 @@ __device__ void computeTotalCost(double *, double *);
 __device__ double computeNewValue(double *);
 __device__ double computeNewPolicy(double *);
 
+// FUNCTIONS FOR ANALYSIS
+double cpuSecond(void);
+
 // DEFINE GLOBAL PARAMETERS IN CPU
 int nr, ntheta, nphi;
 double perr;
@@ -52,10 +53,10 @@ __constant__ double d_gamma1;
 __constant__ double d_vGoal, d_vObst, d_vMove;
 __constant__ double d_vInitial;
 __constant__ int d_numActions;
-//__constant__ double *d_isobst;
-//__constant__ double *d_isgoal;
 
 int main(int argc, char **argv){
+	double iStart = cpuSecond();
+
 	// DEFINE PARAMETERS
 	double dr, dtheta, dphi;
 	double rdim[2], thetadim[2], phidim[2];
@@ -118,16 +119,16 @@ int main(int argc, char **argv){
 	Uprev = (double *)calloc(nr*ntheta*nphi, sizeof(double));
 	
 	// TRANSFER VARIABLE DATA FROM HOST TO DEVICE
-	CHECK(cudaMemcpyToSymbol(*(&d_nr), &nr, sizeof(int), 0, cudaMemcpyHostToDevice));
-	CHECK(cudaMemcpyToSymbol(*(&d_ntheta), &ntheta, sizeof(int), 0, cudaMemcpyHostToDevice));
-	CHECK(cudaMemcpyToSymbol(*(&d_nphi), &nphi, sizeof(int), 0, cudaMemcpyHostToDevice));
-	CHECK(cudaMemcpyToSymbol(*(&d_perr), &perr, sizeof(double), 0, cudaMemcpyHostToDevice));
-	CHECK(cudaMemcpyToSymbol(*(&d_gamma1), &gamma1, sizeof(double), 0, cudaMemcpyHostToDevice));
-	CHECK(cudaMemcpyToSymbol(*(&d_vGoal), &vGoal, sizeof(double), 0, cudaMemcpyHostToDevice));
-	CHECK(cudaMemcpyToSymbol(*(&d_vObst), &vObst, sizeof(double), 0, cudaMemcpyHostToDevice));
-	CHECK(cudaMemcpyToSymbol(*(&d_vMove), &vMove, sizeof(double), 0, cudaMemcpyHostToDevice));
-	CHECK(cudaMemcpyToSymbol(*(&d_vInitial), &vInitial, sizeof(double), 0, cudaMemcpyHostToDevice));
-	CHECK(cudaMemcpyToSymbol(*(&d_numActions), &numActions, sizeof(int), 0, cudaMemcpyHostToDevice));
+	CHECK(cudaMemcpyToSymbol(d_nr, &nr, sizeof(int), 0, cudaMemcpyHostToDevice));
+	CHECK(cudaMemcpyToSymbol(d_ntheta, &ntheta, sizeof(int), 0, cudaMemcpyHostToDevice));
+	CHECK(cudaMemcpyToSymbol(d_nphi, &nphi, sizeof(int), 0, cudaMemcpyHostToDevice));
+	CHECK(cudaMemcpyToSymbol(d_perr, &perr, sizeof(double), 0, cudaMemcpyHostToDevice));
+	CHECK(cudaMemcpyToSymbol(d_gamma1, &gamma1, sizeof(double), 0, cudaMemcpyHostToDevice));
+	CHECK(cudaMemcpyToSymbol(d_vGoal, &vGoal, sizeof(double), 0, cudaMemcpyHostToDevice));
+	CHECK(cudaMemcpyToSymbol(d_vObst, &vObst, sizeof(double), 0, cudaMemcpyHostToDevice));
+	CHECK(cudaMemcpyToSymbol(d_vMove, &vMove, sizeof(double), 0, cudaMemcpyHostToDevice));
+	CHECK(cudaMemcpyToSymbol(d_vInitial, &vInitial, sizeof(double), 0, cudaMemcpyHostToDevice));
+	CHECK(cudaMemcpyToSymbol(d_numActions, &numActions, sizeof(int), 0, cudaMemcpyHostToDevice));
 
 	for(int t=0; t<T; t++){
 		printf("Iteration %d\n", t+1);
@@ -138,16 +139,12 @@ int main(int argc, char **argv){
 
 		// allocate memory at device
 		double  *d_J, *d_U, *d_Jprev, *d_Uprev;
-		//CHECK(cudaMalloc((double**)&d_isobst, nr*ntheta*nphi*sizeof(double)));
-		//CHECK(cudaMalloc((double**)&d_isgoal, nr*ntheta*nphi*sizeof(double)));
 		CHECK(cudaMalloc((double**)&d_J, nr*ntheta*nphi*sizeof(double)));
 		CHECK(cudaMalloc((double**)&d_U, nr*ntheta*nphi*sizeof(double)));
 		CHECK(cudaMalloc((double**)&d_Jprev, nr*ntheta*nphi*sizeof(double)));
 		CHECK(cudaMalloc((double**)&d_Uprev, nr*ntheta*nphi*sizeof(double)));
 
 		// transfer data from host to device
-		//CHECK(cudaMemcpy(d_isobst, isobst, nr*ntheta*nphi*sizeof(double), cudaMemcpyHostToDevice));
-		//CHECK(cudaMemcpy(d_isgoal, isgoal, nr*ntheta*nphi*sizeof(double), cudaMemcpyHostToDevice));
 		CHECK(cudaMemcpy(d_J, J, nr*ntheta*nphi*sizeof(double), cudaMemcpyHostToDevice));
 		CHECK(cudaMemcpy(d_U, U, nr*ntheta*nphi*sizeof(double), cudaMemcpyHostToDevice));
 		CHECK(cudaMemcpy(d_Jprev, Jprev, nr*ntheta*nphi*sizeof(double), cudaMemcpyHostToDevice));
@@ -156,26 +153,20 @@ int main(int argc, char **argv){
 		// configure number of threads and blocks
 		dim3 nThreads(32, 32, 32);
 		dim3 nBlocks((nr/nThreads.x)+1, (ntheta/nThreads.y)+1, (nphi/nThreads.z)+1);
-
+		printf("nBlocks.x=%d nBlocks.y=%d nBlocks.z=%d\n", nBlocks.x,nBlocks.y,nBlocks.z);	
+		
 		// call kernel
 		valueIteration<<<nBlocks, nThreads>>>(d_isobst, d_isgoal, d_J, d_U, d_Jprev);
 		CHECK(cudaDeviceSynchronize());
-
-		// check kernel error
-		CHECK(cudaGetLastError());
 
 		// copy result from device to host
 		CHECK(cudaMemcpy(J, d_J, nr*ntheta*nphi*sizeof(double), cudaMemcpyDeviceToHost));
 		CHECK(cudaMemcpy(U, d_U, nr*ntheta*nphi*sizeof(double), cudaMemcpyDeviceToHost));
 
-		CHECK(cudaFree(d_isobst));
-		CHECK(cudaFree(d_isgoal));
 		CHECK(cudaFree(d_J));
 		CHECK(cudaFree(d_U));
 		CHECK(cudaFree(d_Jprev));
 		CHECK(cudaFree(d_Uprev));
-
-		//valueIteration(isobst, isgoal, J, U, Jprev);
 
 		for(int x=0; x<nr*ntheta*nphi; x++){
 			printf("%2d J=%3.1f U=%2f\n", x, J[x], U[x]);
@@ -183,7 +174,7 @@ int main(int argc, char **argv){
 		printf("\n");
 	}
 
-	// free used memory
+	// FREE USED MEMORY IN CPU
 	free(rVec);
 	free(thetaVec);
 	free(phiVec);
@@ -194,10 +185,17 @@ int main(int argc, char **argv){
 	free(Jprev);
 	free(Uprev);
 	
+	// FREE USED MEMORY IN GPU
+	CHECK(cudaFree(d_isobst));
+	CHECK(cudaFree(d_isgoal));
+
+	double iElaps = cpuSecond()-iStart;
+	printf("Time elapsed on GPU = %f ms\n", iElaps*1000.0f);
+
 	return(0);
 }
 
-/*--------------- SETUP FUNCTIONS ----------------*/
+/*--------------- FUNCTIONS FOR SETUP ----------------*/
 
 int numberCells(double d, double *dim){
 	int n = 0;
@@ -288,13 +286,13 @@ void conditionPolicy(double *isobst, double *isgoal, double *U, int i, int j, in
 	}
 }
 
-/*--------------- VALUE ITERATION FUNCTIONS ----------------*/
+/*--------------- FUNCTIONS FOR VALUE ITERATION ----------------*/
 
 __global__ void valueIteration(double *isobst, double *isgoal, double *J, double *U, double *Jprev){
 	int i=blockIdx.x*blockDim.x+threadIdx.x;
 	int j=blockIdx.y*blockDim.y+threadIdx.y;
 	int k=blockIdx.z*blockDim.z+threadIdx.z;
-
+	printf("i=%d j=%d k=%d\n", i,j,k);
 	double *tempCost, *totalCost;
 	tempCost = (double*)malloc(d_numActions*sizeof(double));
 	totalCost = (double*)malloc(d_numActions*sizeof(double));
@@ -314,9 +312,11 @@ __global__ void valueIteration(double *isobst, double *isgoal, double *J, double
 			U[d_nr*d_ntheta*k+d_ntheta*i+j] = computeNewPolicy(totalCost);
 		}
 	}
-
+	
 	free(tempCost);
 	free(totalCost);
+
+	__syncthreads();
 }
 
 __device__ void conditionR(int i, int j, int k, double *tempCost, double *Jprev){
@@ -399,4 +399,11 @@ __device__ double computeNewPolicy(double *totalCost){
 	}
 
 	return idx;
+}
+
+/*-------------- FUNCTION FOR ANALYSIS --------------*/
+double cpuSecond(void){
+	struct timeval tp;
+	gettimeofday(&tp, NULL);
+	return ((double)tp.tv_sec + (double)tp.tv_usec * 1.e-6);
 }
