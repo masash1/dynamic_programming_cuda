@@ -54,6 +54,14 @@ __constant__ double d_vGoal, d_vObst, d_vMove;
 __constant__ double d_vInitial;
 __constant__ int d_numActions;
 
+/*
+__global__
+void helloFromGPU()
+{
+        printf("blockIdx.x=%d,threadIdx.x=%d,blockDim.x=%d\n",blockIdx.x,threadIdx.x,blockDim.x);
+}
+*/
+
 int main(int argc, char **argv){
 	double iStart = cpuSecond();
 
@@ -62,7 +70,7 @@ int main(int argc, char **argv){
 	double rdim[2], thetadim[2], phidim[2];
 	double *rVec, *thetaVec, *phiVec;
 	// - minimum grid resolution for r, theta, phi
-	dr = 5.0, dtheta = 180.0, dphi = 180;
+	dr = 1.0, dtheta = 1.0, dphi = 1.0;
 	// - dimensions of the state space
 	rdim[0] = 0.0, rdim[1] = 10.0;
 	thetadim[0] = 0.0, thetadim[1] = 360.0;
@@ -112,7 +120,6 @@ int main(int argc, char **argv){
 	setInitialPolicy(isobst, isgoal, U);
 
 	// DO VALUE ITERATION
-	int T = 100;
 	double *Jprev;
 	double *Uprev;
 	Jprev = (double *)calloc(nr*ntheta*nphi, sizeof(double));
@@ -129,9 +136,10 @@ int main(int argc, char **argv){
 	CHECK(cudaMemcpyToSymbol(d_vMove, &vMove, sizeof(double), 0, cudaMemcpyHostToDevice));
 	CHECK(cudaMemcpyToSymbol(d_vInitial, &vInitial, sizeof(double), 0, cudaMemcpyHostToDevice));
 	CHECK(cudaMemcpyToSymbol(d_numActions, &numActions, sizeof(int), 0, cudaMemcpyHostToDevice));
-
-	for(int t=0; t<T; t++){
-		printf("Iteration %d\n", t+1);
+	float error=1;
+	int t=1;
+	while(error!=0){
+		printf("Iteration %d\n", t);
 
 		// Iterate over all states.
 		memcpy(Jprev, J, sizeof(double)*nr*ntheta*nphi);
@@ -151,11 +159,13 @@ int main(int argc, char **argv){
 		CHECK(cudaMemcpy(d_Uprev, Uprev, nr*ntheta*nphi*sizeof(double), cudaMemcpyHostToDevice));
 
 		// configure number of threads and blocks
-		dim3 nThreads(32, 32, 32);
-		dim3 nBlocks((nr/nThreads.x)+1, (ntheta/nThreads.y)+1, (nphi/nThreads.z)+1);
-		printf("nBlocks.x=%d nBlocks.y=%d nBlocks.z=%d\n", nBlocks.x,nBlocks.y,nBlocks.z);	
+		//printf("nr = %d ntheta = %d nphi = %d\n",nr,ntheta, nphi);
+		dim3 nThreads(1,1,1);
+		dim3 nBlocks((nr+nThreads.x-1)/nThreads.x,(ntheta+nThreads.y-1)/nThreads.y,(nphi+nThreads.z-1)/nThreads.z);
+		//printf("nBlocks.x=%d nBlocks.y=%d nBlocks.z=%d\n", nBlocks.x,nBlocks.y,nBlocks.z);	
 		
 		// call kernel
+		//helloFromGPU<<<nBlocks,nThreads>>>();
 		valueIteration<<<nBlocks, nThreads>>>(d_isobst, d_isgoal, d_J, d_U, d_Jprev);
 		CHECK(cudaDeviceSynchronize());
 
@@ -167,10 +177,13 @@ int main(int argc, char **argv){
 		CHECK(cudaFree(d_U));
 		CHECK(cudaFree(d_Jprev));
 		CHECK(cudaFree(d_Uprev));
-
+		
+		error=0;
 		for(int x=0; x<nr*ntheta*nphi; x++){
-			printf("%2d J=%3.1f U=%2f\n", x, J[x], U[x]);
+			//printf("%2d J=%3.1f Jprev= %3.1f U=%2f\n", x, J[x], Jprev[x],U[x]);
+			error+=(J[x]-Jprev[x]);
 		}
+		t+=1;
 		printf("\n");
 	}
 
@@ -292,7 +305,7 @@ __global__ void valueIteration(double *isobst, double *isgoal, double *J, double
 	int i=blockIdx.x*blockDim.x+threadIdx.x;
 	int j=blockIdx.y*blockDim.y+threadIdx.y;
 	int k=blockIdx.z*blockDim.z+threadIdx.z;
-	printf("i=%d j=%d k=%d\n", i,j,k);
+	//printf("i=%d j=%d k=%d\n", blockIdx.x,j,k);
 	double *tempCost, *totalCost;
 	tempCost = (double*)malloc(d_numActions*sizeof(double));
 	totalCost = (double*)malloc(d_numActions*sizeof(double));
