@@ -3,7 +3,6 @@
 #include <stdlib.h>
 #include <sys/time.h>
 #include <string.h>
-#include <cuda_runtime.h>
 
 #define CHECK(call)\
 {\
@@ -44,7 +43,7 @@ float perr;
 float gamma1;
 float vGoal, vObst, vMove;
 float vInitial;
-int numActions=7;
+int numActions;
 
 // DEFINE GLOBAL PARAMETERS IN GPU
 __constant__ int d_nr, d_ntheta, d_nphi;
@@ -57,13 +56,15 @@ __constant__ int d_numActions;
 int main(int argc, char **argv)
 {
 double iStart = cpuSecond();
+	
+	numActions=7;
 
 	// DEFINE PARAMETERS
 	float dr, dtheta, dphi;
 	float rdim[2], thetadim[2], phidim[2];
 	float *rVec, *thetaVec, *phiVec;
 	// - minimum grid resolution for r, theta, phi
-	dr = 1.0, dtheta = 1.0, dphi = 1.0;
+	dr = 1.0, dtheta = 10.0, dphi = 10.0;
 	// - dimensions of the state space
 	rdim[0] = 0.0, rdim[1] = 10.0;
 	thetadim[0] = 0.0, thetadim[1] = 360.0;
@@ -154,7 +155,7 @@ double iStart = cpuSecond();
 
 		// configure number of threads and blocks
 		//printf("nr = %d ntheta = %d nphi = %d\n",nr,ntheta, nphi);
-		dim3 nThreads(1,1,1);
+		dim3 nThreads(2,4,4);
 		dim3 nBlocks((nr+nThreads.x-1)/nThreads.x,(ntheta+nThreads.y-1)/nThreads.y,(nphi+nThreads.z-1)/nThreads.z);
 		//printf("nBlocks.x=%d nBlocks.y=%d nBlocks.z=%d\n", nBlocks.x,nBlocks.y,nBlocks.z);	
 		
@@ -195,7 +196,6 @@ double iStart = cpuSecond();
 	// FREE USED MEMORY IN GPU
 	CHECK(cudaFree(d_isobst));
 	CHECK(cudaFree(d_isgoal));
-
 	
 double iElaps = cpuSecond()-iStart;
 	printf("Time elapsed on GPU = %f ms\n", iElaps*1000.0f);
