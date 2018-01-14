@@ -64,7 +64,7 @@ double iStart = cpuSecond();
 	float rdim[2], thetadim[2], phidim[2];
 	float *rVec, *thetaVec, *phiVec;
 	// - minimum grid resolution for r, theta, phi
-	dr = 1.0, dtheta = 10.0, dphi = 10.0;
+	dr = atof(argv[1]), dtheta = atof(argv[2]), dphi = atof(argv[3]);
 	// - dimensions of the state space
 	rdim[0] = 0.0, rdim[1] = 10.0;
 	thetadim[0] = 0.0, thetadim[1] = 360.0;
@@ -73,6 +73,7 @@ double iStart = cpuSecond();
 	nr = numberCells(dr, rdim);
 	ntheta = numberCells(dtheta, thetadim);
 	nphi = numberCells(dphi, phidim);
+	printf("%d,", nr*ntheta*nphi);
 	// - vectors for r, theta, phi
 	rVec = (float *)malloc(sizeof(float)*nr);
 	thetaVec = (float *)malloc(sizeof(float)*ntheta);
@@ -134,7 +135,7 @@ double iStart = cpuSecond();
 	float error=1;
 	int t=1;
 	while(error!=0){
-		printf("Iteration %d\n", t);
+		//printf("Iteration %d\n", t);
 
 		// Iterate over all states.
 		memcpy(Jprev, J, sizeof(float)*nr*ntheta*nphi);
@@ -179,7 +180,7 @@ double iStart = cpuSecond();
 			error+=(J[x]-Jprev[x]);
 		}
 		t+=1;
-		printf("\n");
+		//printf("\n");
 	}
 
 	// FREE USED MEMORY IN CPU
@@ -198,7 +199,7 @@ double iStart = cpuSecond();
 	CHECK(cudaFree(d_isgoal));
 	
 double iElaps = cpuSecond()-iStart;
-	printf("Time elapsed on GPU = %f ms\n", iElaps*1000.0f);
+	printf("%f\n", iElaps*1000.0f);
 
 	return(0);
 }
@@ -211,7 +212,7 @@ int numberCells(float d, float *dim)
 	float diff;
 	diff = dim[1]-dim[0];
 
-	if(d<1 || d>diff){
+	if(d<0 || d>diff){
 		printf("value of resolution or dimension is invalid.\n");
 	}
 	else{
