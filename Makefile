@@ -1,2 +1,2 @@
 test: test.cu
-	nvcc test.cu -arch sm_52
+	nvcc -arch=sm_52 -rdc=true test.cu -lcudadevrt

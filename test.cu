@@ -22,11 +22,12 @@ void setObst(float *);
 void setGoal(float *, float *, float *);
 void setInitialValue(float *, float *, float *);
 void conditionValue(float *, float *, float *, int, int, int);
-void setInitialPolicy(float *, float *, float *);
-void conditionPolicy(float *, float *, float *, int, int, int);
+void setInitialPolicy(float *, float *, char *);
+void conditionPolicy(float *, float *, char *, int, int, int);
 
 // FUNCTIONS FOR VALUE ITERATION
-__global__ void valueIteration(float *, float *, float *, float *, float *);
+__global__ void mainOnGPU(float *, float *, float *, char *, float *, char *);
+__global__ void valueIteration(float *, float *, float *, char *, float *);
 __device__ void conditionR(int, int, int, float *, float *);
 __device__ void conditionTheta(int, int, int, float *, float *);
 __device__ void conditionPhi(int, int, int, float *, float *);
@@ -108,17 +109,17 @@ double iStart = cpuSecond();
 
 	// DEFINE INITIAL GUESS AT VALUE AND POLICY
 	float *J;
-	float *U;
+	char *U;
 	J = (float *)calloc(nr*ntheta*nphi, sizeof(float));
-	U = (float *)calloc(nr*ntheta*nphi, sizeof(float));
+	U = (char *)calloc(nr*ntheta*nphi, sizeof(char));
 	setInitialValue(isobst, isgoal, J);
 	setInitialPolicy(isobst, isgoal, U);
 
 	// DO VALUE ITERATION
 	float *Jprev;
-	float *Uprev;
+	char *Uprev;
 	Jprev = (float *)calloc(nr*ntheta*nphi, sizeof(float));
-	Uprev = (float *)calloc(nr*ntheta*nphi, sizeof(float));
+	Uprev = (char *)calloc(nr*ntheta*nphi, sizeof(char));
 	
 	// TRANSFER VARIABLE DATA FROM HOST TO DEVICE
 	CHECK(cudaMemcpyToSymbol(d_nr, &nr, sizeof(int), 0, cudaMemcpyHostToDevice));
@@ -132,56 +133,30 @@ double iStart = cpuSecond();
 	CHECK(cudaMemcpyToSymbol(d_vInitial, &vInitial, sizeof(float), 0, cudaMemcpyHostToDevice));
 	CHECK(cudaMemcpyToSymbol(d_numActions, &numActions, sizeof(int), 0, cudaMemcpyHostToDevice));
 	
-	float error=1;
-	int t=1;
-	while(error!=0){
-		//printf("Iteration %d\n", t);
+	// allocate memory at device
+        float  *d_J, *d_Jprev;
+	char *d_U, *d_Uprev;
+        CHECK(cudaMalloc((float**)&d_J, nr*ntheta*nphi*sizeof(float)));
+        CHECK(cudaMalloc((char**)&d_U, nr*ntheta*nphi*sizeof(char)));
+        CHECK(cudaMalloc((float**)&d_Jprev, nr*ntheta*nphi*sizeof(float)));
+        CHECK(cudaMalloc((char**)&d_Uprev, nr*ntheta*nphi*sizeof(char)));
 
-		// Iterate over all states.
-		memcpy(Jprev, J, sizeof(float)*nr*ntheta*nphi);
-		memcpy(Uprev, U, sizeof(float)*nr*ntheta*nphi);
+        // transfer data from host to device
+        CHECK(cudaMemcpy(d_J, J, nr*ntheta*nphi*sizeof(float), cudaMemcpyHostToDevice));
+        CHECK(cudaMemcpy(d_U, U, nr*ntheta*nphi*sizeof(char), cudaMemcpyHostToDevice));
+        CHECK(cudaMemcpy(d_Jprev, Jprev, nr*ntheta*nphi*sizeof(float), cudaMemcpyHostToDevice));
+        CHECK(cudaMemcpy(d_Uprev, Uprev, nr*ntheta*nphi*sizeof(char), cudaMemcpyHostToDevice));
 
-		// allocate memory at device
-		float  *d_J, *d_U, *d_Jprev, *d_Uprev;
-		CHECK(cudaMalloc((float**)&d_J, nr*ntheta*nphi*sizeof(float)));
-		CHECK(cudaMalloc((float**)&d_U, nr*ntheta*nphi*sizeof(float)));
-		CHECK(cudaMalloc((float**)&d_Jprev, nr*ntheta*nphi*sizeof(float)));
-		CHECK(cudaMalloc((float**)&d_Uprev, nr*ntheta*nphi*sizeof(float)));
+	mainOnGPU<<<1,1>>>(d_isobst, d_isgoal, d_J, d_U, d_Jprev, d_Uprev);
+	
+	// copy result from device to host
+        CHECK(cudaMemcpy(J, d_J, nr*ntheta*nphi*sizeof(float), cudaMemcpyDeviceToHost));
+        CHECK(cudaMemcpy(U, d_U, nr*ntheta*nphi*sizeof(char), cudaMemcpyDeviceToHost));
 
-		// transfer data from host to device
-		CHECK(cudaMemcpy(d_J, J, nr*ntheta*nphi*sizeof(float), cudaMemcpyHostToDevice));
-		CHECK(cudaMemcpy(d_U, U, nr*ntheta*nphi*sizeof(float), cudaMemcpyHostToDevice));
-		CHECK(cudaMemcpy(d_Jprev, Jprev, nr*ntheta*nphi*sizeof(float), cudaMemcpyHostToDevice));
-		CHECK(cudaMemcpy(d_Uprev, Uprev, nr*ntheta*nphi*sizeof(float), cudaMemcpyHostToDevice));
-
-		// configure number of threads and blocks
-		//printf("nr = %d ntheta = %d nphi = %d\n",nr,ntheta, nphi);
-		dim3 nThreads(2,4,4);
-		dim3 nBlocks((nr+nThreads.x-1)/nThreads.x,(ntheta+nThreads.y-1)/nThreads.y,(nphi+nThreads.z-1)/nThreads.z);
-		//printf("nBlocks.x=%d nBlocks.y=%d nBlocks.z=%d\n", nBlocks.x,nBlocks.y,nBlocks.z);	
-		
-		// call kernel
-		//helloFromGPU<<<nBlocks,nThreads>>>();
-		valueIteration<<<nBlocks, nThreads>>>(d_isobst, d_isgoal, d_J, d_U, d_Jprev);
-		CHECK(cudaDeviceSynchronize());
-
-		// copy result from device to host
-		CHECK(cudaMemcpy(J, d_J, nr*ntheta*nphi*sizeof(float), cudaMemcpyDeviceToHost));
-		CHECK(cudaMemcpy(U, d_U, nr*ntheta*nphi*sizeof(float), cudaMemcpyDeviceToHost));
-
-		CHECK(cudaFree(d_J));
-		CHECK(cudaFree(d_U));
-		CHECK(cudaFree(d_Jprev));
-		CHECK(cudaFree(d_Uprev));
-		
-		error=0;
-		for(int x=0; x<nr*ntheta*nphi; x++){
-			//printf("%2d J=%3.1f Jprev= %3.1f U=%2f\n", x, J[x], Jprev[x],U[x]);
-			error+=(J[x]-Jprev[x]);
-		}
-		t+=1;
-		//printf("\n");
-	}
+        CHECK(cudaFree(d_J));
+        CHECK(cudaFree(d_U));
+        CHECK(cudaFree(d_Jprev));
+        CHECK(cudaFree(d_Uprev));
 
 	// FREE USED MEMORY IN CPU
 	free(rVec);
@@ -276,7 +251,7 @@ void conditionValue(float *isobst, float *isgoal, float *J, int i, int j, int k)
 	}
 }
 
-void setInitialPolicy(float *isobst, float *isgoal, float *U)
+void setInitialPolicy(float *isobst, float *isgoal, char *U)
 {
 	srand((unsigned)time(NULL));
 
@@ -289,7 +264,7 @@ void setInitialPolicy(float *isobst, float *isgoal, float *U)
 	}
 }
 
-void conditionPolicy(float *isobst, float *isgoal, float *U, int i, int j, int k)
+void conditionPolicy(float *isobst, float *isgoal, char *U, int i, int j, int k)
 {
 	if(isobst[nr*ntheta*k+ntheta*i+j]){
 		U[nr*ntheta*k+ntheta*i+j] = -1;
@@ -298,7 +273,7 @@ void conditionPolicy(float *isobst, float *isgoal, float *U, int i, int j, int k
 		U[nr*ntheta*k+ntheta*i+j] = -1;
 	}
 	else{
-		float r = rand() % 7;
+		char r = rand() % numActions;
 		U[nr*ntheta*k+ntheta*i+j] = r;
 	}
 }
@@ -306,7 +281,35 @@ void conditionPolicy(float *isobst, float *isgoal, float *U, int i, int j, int k
 /*--------------- FUNCTIONS FOR VALUE ITERATION ----------------*/
 
 __global__ 
-void valueIteration(float *isobst, float *isgoal, float *J, float *U, float *Jprev)
+void mainOnGPU(float *d_isobst, float *d_isgoal, float *d_J, char *d_U, float *d_Jprev, char *d_Uprev)
+{
+	dim3 nThreads(2,4,4);
+        dim3 nBlocks((d_nr+nThreads.x-1)/nThreads.x,(d_ntheta+nThreads.y-1)/nThreads.y,(d_nphi+nThreads.z-1)/nThreads.z);
+	
+	float error=1;
+        int t=1;
+        while(error!=0){
+                //printf("Iteration %d\n", t);
+
+                // Iterate over all states.
+                memcpy(d_Jprev, d_J, sizeof(float)*d_nr*d_ntheta*d_nphi);
+                memcpy(d_Uprev, d_U, sizeof(char)*d_nr*d_ntheta*d_nphi);
+    
+                // call kernel
+                valueIteration<<<nBlocks, nThreads>>>(d_isobst, d_isgoal, d_J, d_U, d_Jprev);
+//                CHECK(cudaDeviceSynchronize());
+                error=0;
+                for(int x=0; x<d_nr*d_ntheta*d_nphi; x++){
+                        //printf("%2d d_J=%3.1f d_Jprev= %3.1f d_U=%d\n", x, d_J[x], d_Jprev[x], d_U[x]);
+                        error+=(d_J[x]-d_Jprev[x]);
+                }
+                t+=1;
+                //printf("\n");
+        }
+
+}
+__global__ 
+void valueIteration(float *isobst, float *isgoal, float *J, char *U, float *Jprev)
 {
 	int i=blockIdx.x*blockDim.x+threadIdx.x;
 	int j=blockIdx.y*blockDim.y+threadIdx.y;
